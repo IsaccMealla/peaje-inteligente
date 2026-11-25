@@ -54,6 +54,7 @@ class ExampleTest extends TestCase
             ->get('/dashboard')
             ->assertOk()
             ->assertSee('Agente conversacional')
+            ->assertSee('agente\\/consultar', false)
             ->assertSee('1234ABC');
     }
 
@@ -90,5 +91,40 @@ class ExampleTest extends TestCase
             ->assertJsonPath('registro.tarifa.monto', 75);
 
         Http::assertSent(fn ($request) => str_contains($request->body(), 'name="imagen"'));
+    }
+
+    public function test_bus_uses_the_seeded_bus_tariff(): void
+    {
+        Storage::fake('public');
+        Http::fake([
+            'http://localhost:8000/inferir' => Http::response([
+                'placa' => '1234ABC',
+                'confianza' => 0.95,
+                'categoria' => 'bus',
+                'ejes' => 2,
+                'latencia' => 128.5,
+            ]),
+        ]);
+
+        $usuario = Usuario::create([
+            'email_google' => 'bus-operador@example.com',
+            'nombre' => 'Operador',
+            'rol' => 'operador',
+            'activo' => true,
+        ]);
+        Tarifa::create([
+            'categoria_vehiculo' => 'bus',
+            'monto' => 30,
+            'descripcion' => 'Buses y transporte público',
+        ]);
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/procesar', [
+                'imagen' => UploadedFile::fake()->image('bus.jpg'),
+            ])
+            ->assertOk()
+            ->assertJsonPath('registro.clase_vehiculo', 'Bus')
+            ->assertJsonPath('registro.tarifa.categoria_vehiculo', 'bus')
+            ->assertJsonPath('registro.tarifa.monto', 30);
     }
 }

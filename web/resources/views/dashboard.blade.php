@@ -97,6 +97,7 @@
         const agenteForm = document.getElementById('agente-form');
         const agenteEnviar = document.getElementById('agente-enviar');
         const agenteRespuesta = document.getElementById('agente-respuesta');
+        const agenteUrl = @json(route('agente.consultar', [], false));
 
         agenteForm.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -106,18 +107,28 @@
             agenteRespuesta.textContent = '';
 
             try {
-                const response = await fetch(@json(route('agente.consultar')), {
+                const response = await fetch(agenteUrl, {
                     method: 'POST',
                     headers: { Accept: 'application/json' },
                     credentials: 'same-origin',
                     body: new FormData(agenteForm),
                 });
+                const contentType = response.headers.get('content-type') ?? '';
+                if (!contentType.includes('application/json')) {
+                    if (response.redirected) {
+                        throw new Error('Tu sesión expiró. Recarga la página e inicia sesión otra vez.');
+                    }
+                    throw new Error(`El servidor respondió con HTTP ${response.status} sin JSON.`);
+                }
+
                 const data = await response.json();
                 agenteRespuesta.textContent = data.mensaje
-                    ? `${data.estado}: ${data.mensaje}`
-                    : `No se pudo completar la consulta (${response.status}).`;
+                    ? `${data.estado ?? 'Consulta'}: ${data.mensaje}`
+                    : `No se pudo completar la consulta (HTTP ${response.status}).`;
             } catch (error) {
-                agenteRespuesta.textContent = 'No se pudo conectar con el agente. Intenta nuevamente.';
+                agenteRespuesta.textContent = error.message.startsWith('Failed to fetch')
+                    ? 'No se pudo conectar con el servidor. Verifica tu conexión y que la aplicación esté desplegada en HTTPS.'
+                    : error.message;
             } finally {
                 agenteEnviar.disabled = false;
                 agenteEnviar.textContent = 'Consultar';

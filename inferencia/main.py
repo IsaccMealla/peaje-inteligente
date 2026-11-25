@@ -120,17 +120,19 @@ def detectar_recorte_placa(img_bgr: np.ndarray) -> tuple[np.ndarray, float]:
     detecciones_validas = [
         deteccion
         for deteccion in detecciones
-        if deteccion[6] > 0 and int(deteccion[0]) == 0
+        if deteccion[6] > 0 and int(deteccion[5]) == 0
     ]
     if not detecciones_validas:
         return img_bgr, 0.0
 
     deteccion = max(detecciones_validas, key=lambda fila: float(fila[6]))
     x1, y1, x2, y2 = (float(valor) for valor in deteccion[1:5])
-    x1 = max(0, min(ancho, int((x1 - izquierda) / escala)))
-    x2 = max(0, min(ancho, int((x2 - izquierda) / escala)))
-    y1 = max(0, min(alto, int((y1 - arriba) / escala)))
-    y2 = max(0, min(alto, int((y2 - arriba) / escala)))
+    pad_x = (x2 - x1) * 0.1
+    pad_y = (y2 - y1) * 0.15
+    x1 = max(0, min(ancho, int((x1 - pad_x - izquierda) / escala)))
+    x2 = max(0, min(ancho, int((x2 + pad_x - izquierda) / escala)))
+    y1 = max(0, min(alto, int((y1 - pad_y - arriba) / escala)))
+    y2 = max(0, min(alto, int((y2 + pad_y - arriba) / escala)))
 
     if x2 <= x1 or y2 <= y1:
         return img_bgr, 0.0
@@ -173,6 +175,16 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
 
     # --- M1: Detección de placa (YOLO-v9 ONNX) + OCR ---
     recorte_placa, conf_m1 = detectar_recorte_placa(img_bgr)
+
+    if recorte_placa.shape[1] < 400:
+        escala_ocr = 400 / recorte_placa.shape[1]
+        recorte_placa = cv2.resize(
+            recorte_placa,
+            None,
+            fx=escala_ocr,
+            fy=escala_ocr,
+            interpolation=cv2.INTER_CUBIC,
+        )
 
     lecturas = lector_ocr.readtext(recorte_placa)
     placa_detectada = None

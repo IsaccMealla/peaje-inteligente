@@ -108,14 +108,24 @@ class PeajeApiController extends Controller
             default => 'Liviano',
         };
 
-        $tarifa = Tarifa::where('categoria_vehiculo', $nombreTarifa)->first()
+        $categoriaTarifa = match ($categoria) {
+            'moto' => 'moto',
+            'minibus' => 'minibus',
+            'bus' => 'bus',
+            'camion' => $nombreTarifa,
+            default => 'liviano',
+        };
+        $montoTarifa = match ($categoria) {
+            'moto' => 5.00,
+            'bus' => 30.00,
+            'camion' => 25.00 * max(1, $ejes - 1),
+            default => 15.00,
+        };
+
+        $tarifa = Tarifa::where('categoria_vehiculo', $categoriaTarifa)->first()
             ?? Tarifa::firstOrCreate(
-                ['categoria_vehiculo' => $nombreTarifa],
-                [
-                    'monto' => $categoria === 'camion'
-                        ? 25.00 * max(1, $ejes - 1)
-                        : 15.00,
-                ]
+                ['categoria_vehiculo' => $categoriaTarifa],
+                ['monto' => $montoTarifa]
             );
 
         if ($confianza < 0.60 || empty($placa)) {
