@@ -13,5 +13,14 @@ class VehiculoRegistrado extends Model
         'propietario',
         'categoria',
         'activo',
+        'saldo',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'activo' => 'boolean',
+            'saldo' => 'decimal:2',
+        ];
+    }
 }

@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, UploadFile
 from PIL import Image
 from ultralytics import YOLO
 
-app = FastAPI(title="Microservicio IA - Peaje Inteligente (M1 + M2 + M3)")
+app = FastAPI(title="Microservicio IA - Peaje Inteligente (M1 + M2 + M3 + M4)")
 
 DIRECTORIO_MODELOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modelos")
 PATH_M1_PLACA = os.path.join(
@@ -25,6 +25,7 @@ PATH_M1_CONFIG = os.path.join(
 )
 PATH_M2_SEG = os.path.join(DIRECTORIO_MODELOS, "m2_vehiculos.pt")
 PATH_M3_POSE = os.path.join(DIRECTORIO_MODELOS, "m3_llantas.pt")
+PATH_M4_PASAJEROS = os.path.join(DIRECTORIO_MODELOS, "m4_pasajeros_seg.pt")
 
 for ruta_modelo in (
     PATH_M1_PLACA,
@@ -32,6 +33,7 @@ for ruta_modelo in (
     PATH_M1_CONFIG,
     PATH_M2_SEG,
     PATH_M3_POSE,
+    PATH_M4_PASAJEROS,
 ):
     if not os.path.isfile(ruta_modelo):
         raise FileNotFoundError(f"No se encontró el peso requerido: {ruta_modelo}")
@@ -59,8 +61,10 @@ if len(ALFABETO_PLACA) != sesion_m1_ocr.get_outputs()[0].shape[-1]:
     raise ValueError("El alfabeto de placas no coincide con la salida del modelo OCR")
 modelo_m2 = YOLO(PATH_M2_SEG)
 modelo_m3 = YOLO(PATH_M3_POSE)
+modelo_m4 = YOLO(PATH_M4_PASAJEROS)
 
 lector_ocr = easyocr.Reader(["es", "en"], gpu=False)
+ULTIMAS_LATENCIAS_MODELOS: dict[str, float] = {}
 
 MAPEO_CATEGORIAS = {
     "moto": "moto",
@@ -219,6 +223,8 @@ def health():
         "m1_reconocimiento": os.path.basename(PATH_M1_OCR),
         "m2_vehiculos": os.path.basename(PATH_M2_SEG),
         "m3_llantas": os.path.basename(PATH_M3_POSE),
+        "m4_pasajeros": os.path.basename(PATH_M4_PASAJEROS),
+        "latencia_modelos": ULTIMAS_LATENCIAS_MODELOS.copy(),
     }
 
 
@@ -231,7 +237,9 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
     img_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
     # --- M2: Segmentación de instancias (Categoría del vehículo) ---
+    inicio_m2 = time.perf_counter()
     res_m2 = modelo_m2(img_bgr, verbose=False)[0]
+    latencia_m2_ms = round((time.perf_counter() - inicio_m2) * 1000, 2)
     categoria = "auto"
     conf_m2 = 0.0
     recorte_vehiculo = img_bgr
@@ -246,6 +254,7 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
             recorte_vehiculo = img_bgr[max(0, y1):y2, max(0, x1):x2]
 
     # --- M1: Detección de placa (YOLO-v9 ONNX) + OCR ---
+    inicio_m1 = time.perf_counter()
     recorte_placa, conf_m1 = detectar_recorte_placa(recorte_vehiculo)
     if conf_m1 <= 0 and recorte_vehiculo.shape != img_bgr.shape:
         recorte_placa, conf_m1 = detectar_recorte_placa(img_bgr)
@@ -259,10 +268,29 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
             if candidata and prob > conf_ocr:
                 placa_detectada = candidata
                 conf_ocr = float(prob)
+    latencia_m1_ms = round((time.perf_counter() - inicio_m1) * 1000, 2)
 
     # --- M3: Keypoints sobre las ruedas (Número de ejes) ---
+    inicio_m3 = time.perf_counter()
     res_m3 = modelo_m3(recorte_vehiculo, verbose=False)[0]
     ejes = contar_ejes_desde_keypoints(res_m3, categoria)
+    latencia_m3_ms = round((time.perf_counter() - inicio_m3) * 1000, 2)
+
+    # --- M4: Segmentación de personas para estimar pasajeros ---
+    inicio_m4 = time.perf_counter()
+    res_m4 = modelo_m4(recorte_vehiculo, verbose=False)[0]
+    pasajeros = sum(
+        1 for clase in res_m4.boxes.cls.tolist() if int(clase) == 0
+    ) if res_m4.boxes is not None else 0
+    latencia_m4_ms = round((time.perf_counter() - inicio_m4) * 1000, 2)
+    ULTIMAS_LATENCIAS_MODELOS.update(
+        {
+            "m1": latencia_m1_ms,
+            "m2": latencia_m2_ms,
+            "m3": latencia_m3_ms,
+            "m4": latencia_m4_ms,
+        }
+    )
 
     if placa_detectada:
         confianza = round((conf_m2 + conf_ocr) / 2, 4)
@@ -276,5 +304,12 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
         "confianza": confianza,
         "categoria": categoria,
         "ejes": ejes,
+        "pasajeros": pasajeros,
         "latencia": latencia_ms,
+        "latencia_modelos": {
+            "m1": latencia_m1_ms,
+            "m2": latencia_m2_ms,
+            "m3": latencia_m3_ms,
+            "m4": latencia_m4_ms,
+        },
     }

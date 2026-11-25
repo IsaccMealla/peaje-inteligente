@@ -9,6 +9,21 @@ use Illuminate\Support\Facades\Http;
 
 class AgenteController extends Controller
 {
+    public function historial(string $placa)
+    {
+        $placa = $this->normalizarPlaca($placa);
+        $pasos = Registro::with('tarifa')
+            ->where('placa_detectada', $placa)
+            ->latest()
+            ->paginate(30);
+
+        return response()->json([
+            'placa' => $placa,
+            'total' => $pasos->total(),
+            'pasos' => $pasos,
+        ]);
+    }
+
     public function consultar(Request $request)
     {
         $validated = $request->validate([

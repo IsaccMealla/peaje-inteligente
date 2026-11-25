@@ -12,14 +12,21 @@ class Registro extends Model
         'placa_detectada',
         'clase_vehiculo',
         'ejes',
+        'pasajeros',
         'confianza',
         'latencia_ms',
         'imagen_url',
         'estado',
+        'caseta_id',
     ];
 
     public function tarifa()
     {
         return $this->belongsTo(Tarifa::class);
+    }
+
+    public function caseta()
+    {
+        return $this->belongsTo(Caseta::class);
     }
 }

@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BackofficeController;
+use App\Http\Controllers\DashboardLiveController;
 use App\Http\Controllers\RegistroController;
 use Illuminate\Support\Facades\Route;
 
@@ -14,8 +16,17 @@ Route::get('/auth/google/callback', [AuthController::class, 'callback'])->name('
 
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [AuthController::class, 'dashboard'])->name('dashboard');
+    Route::get('/dashboard/feed', [DashboardLiveController::class, 'feed'])->name('dashboard.feed');
     Route::get('/registros/{registro}/captura', [RegistroController::class, 'captura'])
         ->name('registros.captura');
+    Route::get('/vehiculos', [BackofficeController::class, 'vehiculos'])->name('vehiculos.index');
+    Route::post('/vehiculos', [BackofficeController::class, 'guardarVehiculo'])->name('vehiculos.store');
+    Route::put('/vehiculos/{vehiculo}', [BackofficeController::class, 'actualizarVehiculo'])->name('vehiculos.update');
+    Route::delete('/vehiculos/{vehiculo}', [BackofficeController::class, 'eliminarVehiculo'])->name('vehiculos.destroy');
+    Route::get('/pasos', [BackofficeController::class, 'pasos'])->name('pasos.index');
+    Route::get('/alertas', [BackofficeController::class, 'alertas'])->name('alertas.index');
+    Route::patch('/alertas/{alerta}/leida', [BackofficeController::class, 'marcarAlertaLeida'])->name('alertas.leida');
+    Route::get('/modelos', [BackofficeController::class, 'modelos'])->name('modelos.index');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::post('/agente/consultar', [AgenteController::class, 'consultar'])
         ->name('agente.consultar');

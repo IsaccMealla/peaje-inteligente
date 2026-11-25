@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Events\NuevoRegistroPeaje;
 use App\Http\Controllers\Controller;
 use App\Models\Alerta;
+use App\Models\Caseta;
 use App\Models\Registro;
 use App\Models\Tarifa;
 use App\Models\Usuario;
+use App\Models\VehiculoRegistrado;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -74,6 +76,8 @@ class PeajeApiController extends Controller
         $ejes = 2;
         $confianza = 0.0;
         $latencia = null;
+        $pasajeros = 0;
+        $latenciasModelos = [];
         $estado = 'procesado';
 
         try {
@@ -94,6 +98,8 @@ class PeajeApiController extends Controller
                 $latencia = isset($resultado['latencia'])
                     ? (float) $resultado['latencia']
                     : null;
+                $pasajeros = max(0, (int) ($resultado['pasajeros'] ?? 0));
+                $latenciasModelos = $resultado['latencia_modelos'] ?? [];
             } else {
                 $estado = 'revision';
             }
@@ -134,20 +140,53 @@ class PeajeApiController extends Controller
             $estado = 'revision';
         }
 
+        $vehiculo = $placa !== null
+            ? VehiculoRegistrado::where('placa', strtoupper($placa))->first()
+            : null;
+        $alertaEvasion = null;
+        if ($placa !== null && ! $vehiculo) {
+            $estado = 'revision';
+            $alertaEvasion = [
+                'tipo' => 'vehiculo_no_registrado',
+                'mensaje' => "La placa {$placa} no está registrada en el padrón vehicular.",
+            ];
+        } elseif ($vehiculo && ! $vehiculo->activo) {
+            $estado = 'revision';
+            $alertaEvasion = [
+                'tipo' => 'vehiculo_inactivo',
+                'mensaje' => "La placa {$placa} pertenece a un vehículo inactivo.",
+            ];
+        } elseif ($vehiculo && (float) $vehiculo->saldo <= 0) {
+            $estado = 'revision';
+            $alertaEvasion = [
+                'tipo' => 'saldo_insuficiente',
+                'mensaje' => "La placa {$placa} tiene saldo insuficiente o el vehículo está inactivo.",
+            ];
+        }
+
         $registro = Registro::create([
             'usuario_id' => $request->user()->id,
             'tarifa_id' => $tarifa?->id,
             'placa_detectada' => $placa,
             'clase_vehiculo' => $nombreTarifa,
             'ejes' => $ejes,
+            'pasajeros' => $pasajeros,
             'confianza' => $confianza,
             'latencia_ms' => $latencia,
             'imagen_url' => $imagenDataUri,
             'estado' => $estado,
+            'caseta_id' => Caseta::where('activa', true)->value('id'),
         ]);
 
+        if ($alertaEvasion !== null) {
+            Alerta::create([
+                'registro_id' => $registro->id,
+                ...$alertaEvasion,
+            ]);
+        }
+
         // 4. Generar alerta si requiere revisión manual
-        if ($estado === 'revision') {
+        if ($estado === 'revision' && $alertaEvasion === null) {
             Alerta::create([
                 'registro_id' => $registro->id,
                 'tipo' => empty($placa) ? 'placa_no_legible' : 'baja_confianza',
@@ -158,10 +197,28 @@ class PeajeApiController extends Controller
         // 5. Transmitir en vivo al Dashboard web mediante Pusher
         event(new NuevoRegistroPeaje($registro));
 
-        return response()->json([
+        $registro->load('tarifa');
+        $respuesta = [
             'mensaje' => 'Captura procesada',
-            'registro' => $registro->load('tarifa'),
-        ]);
+            'latencia_modelos' => $latenciasModelos,
+        ];
+
+        if ($request->is('api/v1/pasos/frame')) {
+            $respuesta['paso'] = [
+                'id' => $registro->id,
+                'placa_detectada' => $registro->placa_detectada,
+                'clase_vehiculo' => $registro->clase_vehiculo,
+                'ejes' => $registro->ejes,
+                'pasajeros' => $registro->pasajeros,
+                'confianza' => $registro->confianza,
+                'estado' => $registro->estado,
+                'tarifa' => $registro->tarifa,
+            ];
+        } else {
+            $respuesta['registro'] = $registro;
+        }
+
+        return response()->json($respuesta);
     }
 
     private function crearMiniaturaDataUri(string $contenido): string

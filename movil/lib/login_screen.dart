@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       final respuesta = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/api/auth/google'),
+        Uri.parse('${AppConfig.baseUrl}/api/v1/auth/google'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',

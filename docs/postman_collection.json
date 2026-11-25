@@ -1,0 +1,93 @@
+{
+  "info": {
+    "_postman_id": "bc8c5c03-73ed-4e8a-a9f1-5b2746de5545",
+    "name": "Sistema Inteligente de Control de Peaje - API v1",
+    "description": "Rutas de autenticación, captura de pasos, consulta de placas, casetas y agente.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "token", "value": "" },
+    { "key": "googleIdToken", "value": "" },
+    { "key": "placa", "value": "9001QAA" },
+    { "key": "casetaId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "POST /api/v1/auth/google",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"id_token\": \"{{googleIdToken}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/api/v1/auth/google"
+      }
+    },
+    {
+      "name": "POST /api/v1/pasos/frame",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "body": { "mode": "formdata", "formdata": [{ "key": "imagen", "type": "file", "src": "" }] },
+        "url": "{{baseUrl}}/api/v1/pasos/frame"
+      }
+    },
+    {
+      "name": "POST /api/v1/placas/consultar",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+        "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"texto\": \"{{placa}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/api/v1/placas/consultar"
+      }
+    },
+    {
+      "name": "POST /api/v1/placas/consultar-imagen",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "body": { "mode": "formdata", "formdata": [{ "key": "imagen", "type": "file", "src": "" }] },
+        "url": "{{baseUrl}}/api/v1/placas/consultar-imagen"
+      }
+    },
+    {
+      "name": "GET /api/v1/placas/{placa}/historial",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/placas/{{placa}}/historial"
+      }
+    },
+    {
+      "name": "GET /api/v1/casetas/{id}/resumen",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/casetas/{{casetaId}}/resumen"
+      }
+    },
+    {
+      "name": "POST /api/v1/agente/chat",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+        "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"texto\": \"¿Qué información hay de la placa {{placa}}?\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/api/v1/agente/chat"
+      }
+    },
+    {
+      "name": "GET /api/v1/dashboard/live",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/dashboard/live"
+      }
+    }
+  ]
+}

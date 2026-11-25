@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Caseta;
 use App\Models\Tarifa;
 use App\Models\Usuario;
 use Illuminate\Database\Seeder;
@@ -15,6 +16,14 @@ class DatabaseSeeder extends Seeder
             ['email_google' => 'lpze.isaccleonardo.mealla.po@unifranz.edu.bo'], // <-- CAMBIA ESTO POR TU GMAIL REAL
             [
                 'nombre' => 'Isacc Mealla (Admin)',
+                'rol' => 'admin',
+                'activo' => true,
+            ]
+        );
+        Usuario::updateOrCreate(
+            ['email_google' => 'doc.alvaro.pinto.ma@unifranz.edu.bo'],
+            [
+                'nombre' => 'Administrador',
                 'rol' => 'admin',
                 'activo' => true,
             ]
@@ -34,6 +43,11 @@ class DatabaseSeeder extends Seeder
                 $tarifa
             );
         }
+
+        Caseta::updateOrCreate(
+            ['nombre' => 'Caseta principal'],
+            ['activa' => true]
+        );
 
         $this->call(VehiculoRegistradoSeeder::class);
     }
