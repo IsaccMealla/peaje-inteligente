@@ -28,6 +28,13 @@ class PeajeApiController extends Controller
         $payload = $response->json();
         $email = $payload['email'] ?? null;
 
+        $webClientId = config('services.google.client_id');
+        if ($webClientId && (($payload['aud'] ?? null) !== $webClientId)) {
+            return response()->json([
+                'error' => 'El token no pertenece al cliente web de Google configurado',
+            ], 401);
+        }
+
         $usuario = Usuario::where('email_google', $email)
             ->where('activo', true)
             ->first();
