@@ -6,6 +6,7 @@ import cv2
 import easyocr
 import numpy as np
 import onnxruntime as ort
+import yaml
 from fastapi import FastAPI, File, UploadFile
 from PIL import Image
 from ultralytics import YOLO
@@ -17,12 +18,26 @@ PATH_M1_PLACA = os.path.join(
     DIRECTORIO_MODELOS,
     "yolo-v9-t-384-license-plates-end2end.onnx",
 )
+PATH_M1_OCR = os.path.join(DIRECTORIO_MODELOS, "cct_xs_v2_global.onnx")
+PATH_M1_CONFIG = os.path.join(
+    DIRECTORIO_MODELOS,
+    "cct_xs_v2_global_plate_config.yaml",
+)
 PATH_M2_SEG = os.path.join(DIRECTORIO_MODELOS, "m2_vehiculos.pt")
 PATH_M3_POSE = os.path.join(DIRECTORIO_MODELOS, "m3_llantas.pt")
 
-for ruta_modelo in (PATH_M1_PLACA, PATH_M2_SEG, PATH_M3_POSE):
+for ruta_modelo in (
+    PATH_M1_PLACA,
+    PATH_M1_OCR,
+    PATH_M1_CONFIG,
+    PATH_M2_SEG,
+    PATH_M3_POSE,
+):
     if not os.path.isfile(ruta_modelo):
         raise FileNotFoundError(f"No se encontró el peso requerido: {ruta_modelo}")
+
+with open(PATH_M1_CONFIG, encoding="utf-8") as archivo_config:
+    config_placa = yaml.safe_load(archivo_config)
 
 sesion_m1 = ort.InferenceSession(
     PATH_M1_PLACA,
@@ -30,6 +45,18 @@ sesion_m1 = ort.InferenceSession(
 )
 nombre_entrada_m1 = sesion_m1.get_inputs()[0].name
 nombre_salida_m1 = sesion_m1.get_outputs()[0].name
+sesion_m1_ocr = ort.InferenceSession(
+    PATH_M1_OCR,
+    providers=["CPUExecutionProvider"],
+)
+nombre_entrada_m1_ocr = sesion_m1_ocr.get_inputs()[0].name
+nombre_salida_m1_ocr = sesion_m1_ocr.get_outputs()[0].name
+ALFABETO_PLACA = config_placa["alphabet"]
+CARACTER_RELLENO_PLACA = config_placa["pad_char"]
+ALTO_PLACA = int(config_placa["img_height"])
+ANCHO_PLACA = int(config_placa["img_width"])
+if len(ALFABETO_PLACA) != sesion_m1_ocr.get_outputs()[0].shape[-1]:
+    raise ValueError("El alfabeto de placas no coincide con la salida del modelo OCR")
 modelo_m2 = YOLO(PATH_M2_SEG)
 modelo_m3 = YOLO(PATH_M3_POSE)
 
@@ -55,6 +82,33 @@ def normalizar_placa(texto: str) -> str:
     ):
         return limpio
     return ""
+
+
+def reconocer_placa_cct(recorte_bgr: np.ndarray) -> tuple[str | None, float]:
+    imagen_rgb = cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2RGB)
+    imagen_entrada = cv2.resize(
+        imagen_rgb,
+        (ANCHO_PLACA, ALTO_PLACA),
+        interpolation=cv2.INTER_LINEAR,
+    )[None]
+    salida = sesion_m1_ocr.run(
+        [nombre_salida_m1_ocr],
+        {nombre_entrada_m1_ocr: imagen_entrada},
+    )[0][0]
+
+    indices = np.argmax(salida, axis=1)
+    texto = "".join(ALFABETO_PLACA[indice] for indice in indices)
+    indices_validos = [
+        i
+        for i, indice in enumerate(indices)
+        if ALFABETO_PLACA[indice] != CARACTER_RELLENO_PLACA
+    ]
+    if not indices_validos:
+        return None, 0.0
+
+    placa = normalizar_placa(texto)
+    confianza = float(np.mean([salida[i, indices[i]] for i in indices_validos]))
+    return (placa or None), confianza
 
 
 def contar_ejes_desde_keypoints(res_m3, categoria: str) -> int:
@@ -145,6 +199,7 @@ def health():
     return {
         "status": "ok",
         "m1_placa": os.path.basename(PATH_M1_PLACA),
+        "m1_reconocimiento": os.path.basename(PATH_M1_OCR),
         "m2_vehiculos": os.path.basename(PATH_M2_SEG),
         "m3_llantas": os.path.basename(PATH_M3_POSE),
     }
@@ -174,27 +229,27 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
             recorte_vehiculo = img_bgr[max(0, y1):y2, max(0, x1):x2]
 
     # --- M1: Detección de placa (YOLO-v9 ONNX) + OCR ---
-    recorte_placa, conf_m1 = detectar_recorte_placa(img_bgr)
+    recorte_placa, conf_m1 = detectar_recorte_placa(recorte_vehiculo)
+    if conf_m1 <= 0 and recorte_vehiculo.shape != img_bgr.shape:
+        recorte_placa, conf_m1 = detectar_recorte_placa(img_bgr)
 
-    if recorte_placa.shape[1] < 400:
-        escala_ocr = 400 / recorte_placa.shape[1]
-        recorte_placa = cv2.resize(
-            recorte_placa,
-            None,
-            fx=escala_ocr,
-            fy=escala_ocr,
-            interpolation=cv2.INTER_CUBIC,
-        )
-
-    lecturas = lector_ocr.readtext(recorte_placa)
-    placa_detectada = None
-    conf_ocr = 0.0
-
-    for (_, texto, prob) in lecturas:
-        candidata = normalizar_placa(texto)
-        if candidata and prob > conf_ocr:
-            placa_detectada = candidata
-            conf_ocr = float(prob)
+    placa_detectada, conf_ocr = reconocer_placa_cct(recorte_placa)
+    if not placa_detectada:
+        if recorte_placa.shape[1] < 400:
+            escala_ocr = 400 / recorte_placa.shape[1]
+            recorte_placa = cv2.resize(
+                recorte_placa,
+                None,
+                fx=escala_ocr,
+                fy=escala_ocr,
+                interpolation=cv2.INTER_CUBIC,
+            )
+        lecturas = lector_ocr.readtext(recorte_placa)
+        for (_, texto, prob) in lecturas:
+            candidata = normalizar_placa(texto)
+            if candidata and prob > conf_ocr:
+                placa_detectada = candidata
+                conf_ocr = float(prob)
 
     # --- M3: Keypoints sobre las ruedas (Número de ejes) ---
     res_m3 = modelo_m3(recorte_vehiculo, verbose=False)[0]
