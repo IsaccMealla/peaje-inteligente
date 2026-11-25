@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -13,4 +14,6 @@ Route::get('/auth/google/callback', [AuthController::class, 'callback'])->name('
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [AuthController::class, 'dashboard'])->name('dashboard');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::post('/agente/consultar', [AgenteController::class, 'consultar'])
+        ->name('agente.consultar');
 });

@@ -39,7 +39,7 @@ class PeajeApiController extends Controller
             ->where('activo', true)
             ->first();
 
-        if (!$usuario) {
+        if (! $usuario) {
             return response()->json(['error' => 'Usuario no autorizado o inactivo'], 403);
         }
 
@@ -66,7 +66,7 @@ class PeajeApiController extends Controller
         $rutaImagen = $request->file('imagen')->store('capturas', 'public');
 
         // 2. Enviar imagen al microservicio de IA (FastAPI)
-        $iaUrl = rtrim(config('services.ia.url'), '/') . '/inferir';
+        $iaUrl = rtrim(config('services.ia.url'), '/').'/inferir';
         $placa = null;
         $categoria = 'auto';
         $ejes = 2;
@@ -75,9 +75,9 @@ class PeajeApiController extends Controller
         $estado = 'procesado';
 
         try {
-            $iaResponse = Http::timeout(15)
+            $iaResponse = Http::timeout(30)
                 ->attach(
-                    'file',
+                    'imagen',
                     file_get_contents($request->file('imagen')->getRealPath()),
                     basename($rutaImagen)
                 )
@@ -139,7 +139,7 @@ class PeajeApiController extends Controller
             Alerta::create([
                 'registro_id' => $registro->id,
                 'tipo' => empty($placa) ? 'placa_no_legible' : 'baja_confianza',
-                'mensaje' => "Registro #{$registro->id} requiere verificación manual (Confianza: " . round($confianza * 100) . "%).",
+                'mensaje' => "Registro #{$registro->id} requiere verificación manual (Confianza: ".round($confianza * 100).'%).',
             ]);
         }
 

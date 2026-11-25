@@ -53,6 +53,7 @@ class ExampleTest extends TestCase
         $this->actingAs($usuario)
             ->get('/dashboard')
             ->assertOk()
+            ->assertSee('Agente conversacional')
             ->assertSee('1234ABC');
     }
 
@@ -87,5 +88,7 @@ class ExampleTest extends TestCase
             ->assertJsonPath('registro.clase_vehiculo', 'Pesado (3+ ejes)')
             ->assertJsonPath('registro.tarifa.categoria_vehiculo', 'Pesado (3+ ejes)')
             ->assertJsonPath('registro.tarifa.monto', 75);
+
+        Http::assertSent(fn ($request) => str_contains($request->body(), 'name="imagen"'));
     }
 }

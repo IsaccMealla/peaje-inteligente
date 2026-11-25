@@ -34,5 +34,7 @@ class DatabaseSeeder extends Seeder
                 $tarifa
             );
         }
+
+        $this->call(VehiculoRegistradoSeeder::class);
     }
 }

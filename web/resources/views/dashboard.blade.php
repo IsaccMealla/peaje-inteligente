@@ -52,9 +52,78 @@
                 </tbody>
             </table>
         </div>
+
+        <section class="mt-8 bg-slate-800 rounded-xl border border-slate-700 p-6">
+            <h2 class="text-xl font-bold text-white mb-2">Agente conversacional</h2>
+            <p class="text-sm text-slate-400 mb-5">
+                Consulta el padrón y los pasos del peaje escribiendo una placa o subiendo una imagen.
+            </p>
+            <form id="agente-form" class="space-y-4">
+                @csrf
+                <div>
+                    <label for="agente-texto" class="block text-sm text-slate-300 mb-1">Placa</label>
+                    <input
+                        id="agente-texto"
+                        name="texto"
+                        type="text"
+                        maxlength="50"
+                        placeholder="Ej. 4021XYZ"
+                        class="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-white placeholder-slate-500"
+                    >
+                </div>
+                <div>
+                    <label for="agente-imagen" class="block text-sm text-slate-300 mb-1">O imagen del vehículo</label>
+                    <input
+                        id="agente-imagen"
+                        name="imagen"
+                        type="file"
+                        accept="image/*"
+                        class="block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white"
+                    >
+                </div>
+                <button
+                    id="agente-enviar"
+                    type="submit"
+                    class="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-2 font-medium text-white"
+                >
+                    Consultar
+                </button>
+            </form>
+            <pre id="agente-respuesta" role="status" aria-live="polite" class="hidden mt-5 whitespace-pre-wrap rounded-lg bg-slate-900 p-4 text-sm text-slate-200"></pre>
+        </section>
     </div>
 
     <script>
+        const agenteForm = document.getElementById('agente-form');
+        const agenteEnviar = document.getElementById('agente-enviar');
+        const agenteRespuesta = document.getElementById('agente-respuesta');
+
+        agenteForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            agenteEnviar.disabled = true;
+            agenteEnviar.textContent = 'Consultando...';
+            agenteRespuesta.classList.remove('hidden');
+            agenteRespuesta.textContent = '';
+
+            try {
+                const response = await fetch(@json(route('agente.consultar')), {
+                    method: 'POST',
+                    headers: { Accept: 'application/json' },
+                    credentials: 'same-origin',
+                    body: new FormData(agenteForm),
+                });
+                const data = await response.json();
+                agenteRespuesta.textContent = data.mensaje
+                    ? `${data.estado}: ${data.mensaje}`
+                    : `No se pudo completar la consulta (${response.status}).`;
+            } catch (error) {
+                agenteRespuesta.textContent = 'No se pudo conectar con el agente. Intenta nuevamente.';
+            } finally {
+                agenteEnviar.disabled = false;
+                agenteEnviar.textContent = 'Consultar';
+            }
+        });
+
         const pusher = new Pusher("{{ config('broadcasting.connections.pusher.key') }}", {
             cluster: "{{ config('broadcasting.connections.pusher.options.cluster') }}"
         });
