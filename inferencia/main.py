@@ -349,7 +349,7 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
         "confianza_detector_placa": round(confianza_detector, 4),
         "candidatos_placa": len(candidatos_recorte),
         "confianza_vehiculo": round(conf_m2, 4),
-        "categoria": categoria,
+        "categoria": categoria if conf_m2 > 0 else None,
         "ejes": ejes,
         "pasajeros": pasajeros,
         "latencia": latencia_ms,

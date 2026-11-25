@@ -12,6 +12,7 @@ use App\Models\Usuario;
 use App\Models\VehiculoRegistrado;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class PeajeApiController extends Controller
@@ -75,12 +76,13 @@ class PeajeApiController extends Controller
         // 2. Enviar imagen al microservicio de IA (FastAPI)
         $iaUrl = rtrim(config('services.ia.url'), '/').'/inferir';
         $placa = null;
-        $categoria = 'auto';
+        $categoria = null;
         $ejes = 2;
         $confianza = 0.0;
         $latencia = null;
         $pasajeros = 0;
         $latenciasModelos = [];
+        $inferenciaDisponible = false;
         $estado = 'procesado';
 
         try {
@@ -95,7 +97,10 @@ class PeajeApiController extends Controller
             if ($iaResponse->successful()) {
                 $resultado = $iaResponse->json();
                 $placa = $resultado['placa'] ?? null;
-                $categoria = strtolower($resultado['categoria'] ?? 'auto');
+                $categoriaDetectada = strtolower($resultado['categoria'] ?? '');
+                $categoria = in_array($categoriaDetectada, [
+                    'moto', 'auto', 'minibus', 'bus', 'camion',
+                ], true) ? $categoriaDetectada : null;
                 $ejes = (int) ($resultado['ejes'] ?? 2);
                 $confianza = (float) ($resultado['confianza'] ?? 0.0);
                 $latencia = isset($resultado['latencia'])
@@ -103,20 +108,26 @@ class PeajeApiController extends Controller
                     : null;
                 $pasajeros = max(0, (int) ($resultado['pasajeros'] ?? 0));
                 $latenciasModelos = $resultado['latencia_modelos'] ?? [];
+                $inferenciaDisponible = true;
             } else {
+                Log::warning('El servicio de inferencia rechazó el paso.', [
+                    'http_status' => $iaResponse->status(),
+                ]);
                 $estado = 'revision';
             }
         } catch (\Exception $e) {
+            report($e);
             $estado = 'revision';
         }
 
         // 3. Buscar tarifa correspondiente y guardar registro
         $nombreTarifa = match ($categoria) {
-            'moto' => 'Motocicleta',
-            'minibus' => 'Minibús',
+            'moto' => 'Moto',
+            'auto' => 'Auto',
+            'minibus' => 'Minibus',
             'bus' => 'Bus',
-            'camion' => $ejes >= 3 ? 'Pesado (3+ ejes)' : 'Pesado (2 ejes)',
-            default => 'Liviano',
+            'camion' => $ejes >= 3 ? 'Pesado (3+ ejes)' : 'Camion',
+            default => 'Sin clasificar',
         };
 
         $categoriaTarifa = match ($categoria) {
@@ -125,7 +136,7 @@ class PeajeApiController extends Controller
             'minibus' => 'minibus',
             'bus' => 'bus',
             'camion' => 'camion',
-            default => 'auto',
+            default => null,
         };
         $montoTarifa = match ($categoria) {
             'moto' => 5.00,
@@ -134,15 +145,17 @@ class PeajeApiController extends Controller
             default => 15.00,
         };
 
-        $tarifa = Tarifa::where('categoria_vehiculo', $categoriaTarifa)
-            ->where('ejes', $ejes)
-            ->first()
-            ?? Tarifa::firstOrCreate(
-                ['categoria_vehiculo' => $categoriaTarifa, 'ejes' => $ejes],
-                ['monto' => $montoTarifa]
-            );
+        $tarifa = $categoriaTarifa === null
+            ? null
+            : Tarifa::where('categoria_vehiculo', $categoriaTarifa)
+                ->where('ejes', $ejes)
+                ->first()
+                ?? Tarifa::firstOrCreate(
+                    ['categoria_vehiculo' => $categoriaTarifa, 'ejes' => $ejes],
+                    ['monto' => $montoTarifa]
+                );
 
-        if ($confianza < 0.60 || empty($placa)) {
+        if ($confianza < 0.60 || empty($placa) || $categoria === null) {
             $estado = 'revision';
         }
 
@@ -195,7 +208,9 @@ class PeajeApiController extends Controller
         if ($estado === 'revision' && $alertaEvasion === null) {
             Alerta::create([
                 'registro_id' => $registro->id,
-                'tipo' => empty($placa) ? 'placa_no_legible' : 'baja_confianza',
+                'tipo' => empty($placa)
+                    ? 'placa_no_legible'
+                    : ($categoria === null ? 'clasificacion_no_disponible' : 'baja_confianza'),
                 'mensaje' => "Registro #{$registro->id} requiere verificación manual (Confianza: ".round($confianza * 100).'%).',
             ]);
         }
@@ -205,7 +220,10 @@ class PeajeApiController extends Controller
 
         $registro->load('tarifa');
         $respuesta = [
-            'mensaje' => 'Captura procesada',
+            'mensaje' => $inferenciaDisponible
+                ? 'Captura procesada'
+                : 'Captura guardada para revisión: inferencia no disponible.',
+            'inferencia_disponible' => $inferenciaDisponible,
             'latencia_modelos' => $latenciasModelos,
         ];
 
@@ -219,6 +237,9 @@ class PeajeApiController extends Controller
                 'confianza' => $registro->confianza,
                 'estado' => $registro->estado,
                 'tarifa' => $registro->tarifa,
+                'latencia_ms' => $registro->latencia_ms,
+                'latencia_modelos' => $latenciasModelos,
+                'inferencia_disponible' => $inferenciaDisponible,
             ];
         } else {
             $respuesta['registro'] = $registro;

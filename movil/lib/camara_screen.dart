@@ -114,15 +114,23 @@ class _CamaraScreenState extends State<CamaraScreen> {
 
     setState(() => _enviando = true);
     try {
+      final captura = Stopwatch()..start();
       final foto = await controller.takePicture();
+      captura.stop();
+      final solicitud = Stopwatch()..start();
       final respuesta = await _enviarFoto(
         foto,
         endpoint: '/api/v1/pasos/frame',
       );
+      solicitud.stop();
       if (!mounted) return;
+      final paso = (respuesta['paso'] ?? respuesta['registro'])
+          as Map<String, dynamic>?;
+      paso?['captura_ms'] = captura.elapsedMilliseconds;
+      paso?['respuesta_api_ms'] = solicitud.elapsedMilliseconds;
+      paso?['inferencia_disponible'] = respuesta['inferencia_disponible'] != false;
       setState(() {
-        _ultimoRegistro = (respuesta['paso'] ?? respuesta['registro'])
-            as Map<String, dynamic>?;
+        _ultimoRegistro = paso;
       });
     } catch (error) {
       if (mounted && !silencioso) _mostrarError(error);
@@ -226,17 +234,28 @@ class _CamaraScreenState extends State<CamaraScreen> {
       _respuestaConsulta = null;
     });
     try {
+      final captura = Stopwatch()..start();
       final foto = await controller.takePicture();
+      captura.stop();
+      final solicitud = Stopwatch()..start();
       final respuesta = await _enviarFoto(
         foto,
         endpoint: '/api/v1/pasos/frame',
       );
+      solicitud.stop();
       final paso = respuesta['paso'] as Map<String, dynamic>?;
+      paso?['captura_ms'] = captura.elapsedMilliseconds;
+      paso?['respuesta_api_ms'] = solicitud.elapsedMilliseconds;
+      paso?['inferencia_disponible'] = respuesta['inferencia_disponible'] != false;
       if (mounted) {
         setState(() => _ultimoRegistro = paso);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Paso registrado y enviado al panel en tiempo real'),
+          SnackBar(
+            content: Text(
+              respuesta['inferencia_disponible'] == false
+                  ? 'Foto guardada para revisión: inferencia no disponible.'
+                  : 'Paso registrado y enviado al panel en tiempo real',
+            ),
           ),
         );
       }
@@ -394,6 +413,10 @@ class _CamaraScreenState extends State<CamaraScreen> {
     final monto = tarifa is Map<String, dynamic>
         ? tarifa['monto'] ?? '0.00'
         : tarifa ?? '0.00';
+    final confianza = registro['confianza'];
+    final confianzaTexto = confianza is num
+        ? '${(confianza * 100).toStringAsFixed(1)}%'
+        : '—';
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -419,9 +442,18 @@ class _CamaraScreenState extends State<CamaraScreen> {
             spacing: 12,
             runSpacing: 6,
             children: [
+              _dato('Confianza OCR', confianzaTexto),
               _dato('Categoría', registro['clase_vehiculo'] ?? registro['categoria']),
               _dato('Ejes', registro['ejes']),
               _dato('Pasajeros', registro['pasajeros']),
+              _dato(
+                'Inferencia',
+                registro['inferencia_disponible'] == false
+                    ? 'No disponible'
+                    : 'Disponible',
+              ),
+              _dato('Captura', '${registro['captura_ms'] ?? '—'} ms'),
+              _dato('Respuesta', '${registro['respuesta_api_ms'] ?? '—'} ms'),
               _dato('Tarifa', 'Bs. $monto'),
               _dato('Estado', registro['estado']),
             ],

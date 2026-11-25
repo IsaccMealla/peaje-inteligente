@@ -92,6 +92,54 @@ class OperationsModulesTest extends TestCase
             ->assertJsonPath('paso.tarifa.monto', 72.5);
     }
 
+    public function test_unavailable_inference_does_not_report_or_charge_an_auto(): void
+    {
+        Http::fake([
+            'http://localhost:8000/inferir' => Http::response([], 503),
+        ]);
+        Tarifa::create(['categoria_vehiculo' => 'auto', 'ejes' => 2, 'monto' => 15]);
+        $usuario = $this->createUser('operador', 'inference-offline@example.com');
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pasos/frame', [
+                'imagen' => UploadedFile::fake()->image('sin-inferencia.jpg'),
+            ])
+            ->assertOk()
+            ->assertJsonPath('inferencia_disponible', false)
+            ->assertJsonPath('paso.clase_vehiculo', 'Sin clasificar')
+            ->assertJsonPath('paso.tarifa', null);
+
+        $this->assertDatabaseHas('registros', [
+            'clase_vehiculo' => 'Sin clasificar',
+            'tarifa_id' => null,
+            'estado' => 'revision',
+        ]);
+    }
+
+    public function test_detected_auto_is_reported_as_auto(): void
+    {
+        Http::fake([
+            'http://localhost:8000/inferir' => Http::response([
+                'placa' => '5571SIS',
+                'confianza' => 0.96,
+                'confianza_vehiculo' => 0.78,
+                'categoria' => 'auto',
+                'ejes' => 2,
+                'pasajeros' => 0,
+            ]),
+        ]);
+        Tarifa::create(['categoria_vehiculo' => 'auto', 'ejes' => 2, 'monto' => 15]);
+        $usuario = $this->createUser('operador', 'auto-category@example.com');
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pasos/frame', [
+                'imagen' => UploadedFile::fake()->image('auto.jpg'),
+            ])
+            ->assertOk()
+            ->assertJsonPath('paso.clase_vehiculo', 'Auto')
+            ->assertJsonPath('paso.tarifa.monto', 15);
+    }
+
     public function test_web_agent_handles_quick_queries_and_multiple_photos(): void
     {
         Http::fake([
