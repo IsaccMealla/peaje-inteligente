@@ -1,0 +1,8 @@
+.env
+/web/vendor/
+/web/node_modules/
+/web/public/storage
+/movil/build/
+/movil/.dart_tool/
+/inferencia/weights/*.pt
+__pycache__/
