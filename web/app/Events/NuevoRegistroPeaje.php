@@ -24,7 +24,7 @@ class NuevoRegistroPeaje implements ShouldBroadcast
             'categoria' => $registro->clase_vehiculo ?? 'Desconocido',
             'tarifa' => $registro->tarifa ? $registro->tarifa->monto : 0,
             'confianza' => round($registro->confianza * 100, 1),
-            'imagen_url' => asset('storage/' . $registro->imagen_url),
+            'imagen_url' => route('registros.captura', ['registro' => $registro->id], false),
             'estado' => $registro->estado,
             'hora' => $registro->created_at->format('H:i:s'),
         ];

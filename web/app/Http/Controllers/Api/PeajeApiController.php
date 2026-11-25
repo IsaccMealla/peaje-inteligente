@@ -10,6 +10,7 @@ use App\Models\Tarifa;
 use App\Models\Usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 
 class PeajeApiController extends Controller
 {
@@ -62,8 +63,9 @@ class PeajeApiController extends Controller
             'imagen' => 'required|image|max:10240',
         ]);
 
-        // 1. Guardar imagen en storage/app/public/capturas
-        $rutaImagen = $request->file('imagen')->store('capturas', 'public');
+        $archivoImagen = $request->file('imagen');
+        $contenidoImagen = file_get_contents($archivoImagen->getRealPath());
+        $imagenDataUri = $this->crearMiniaturaDataUri($contenidoImagen);
 
         // 2. Enviar imagen al microservicio de IA (FastAPI)
         $iaUrl = rtrim(config('services.ia.url'), '/').'/inferir';
@@ -78,8 +80,8 @@ class PeajeApiController extends Controller
             $iaResponse = Http::timeout(30)
                 ->attach(
                     'imagen',
-                    file_get_contents($request->file('imagen')->getRealPath()),
-                    basename($rutaImagen)
+                    $contenidoImagen,
+                    $archivoImagen->hashName()
                 )
                 ->post($iaUrl);
 
@@ -140,7 +142,7 @@ class PeajeApiController extends Controller
             'ejes' => $ejes,
             'confianza' => $confianza,
             'latencia_ms' => $latencia,
-            'imagen_url' => $rutaImagen,
+            'imagen_url' => $imagenDataUri,
             'estado' => $estado,
         ]);
 
@@ -160,5 +162,64 @@ class PeajeApiController extends Controller
             'mensaje' => 'Captura procesada',
             'registro' => $registro->load('tarifa'),
         ]);
+    }
+
+    private function crearMiniaturaDataUri(string $contenido): string
+    {
+        if (! function_exists('imagecreatefromstring')) {
+            throw new RuntimeException('La extensión GD es necesaria para procesar capturas.');
+        }
+
+        $imagen = @imagecreatefromstring($contenido);
+        if ($imagen === false) {
+            throw new RuntimeException('No se pudo decodificar la imagen recibida.');
+        }
+
+        $ancho = imagesx($imagen);
+        $alto = imagesy($imagen);
+        $escala = min(1, 480 / $ancho);
+        $anchoMiniatura = max(1, (int) round($ancho * $escala));
+        $altoMiniatura = max(1, (int) round($alto * $escala));
+        $miniatura = imagecreatetruecolor($anchoMiniatura, $altoMiniatura);
+        if ($miniatura === false) {
+            imagedestroy($imagen);
+            throw new RuntimeException('No se pudo crear la miniatura de la captura.');
+        }
+
+        try {
+            if (! imagecopyresampled(
+                $miniatura,
+                $imagen,
+                0,
+                0,
+                0,
+                0,
+                $anchoMiniatura,
+                $altoMiniatura,
+                $ancho,
+                $alto
+            )) {
+                throw new RuntimeException('No se pudo redimensionar la captura.');
+            }
+
+            ob_start();
+            try {
+                if (! imagejpeg($miniatura, null, 75)) {
+                    throw new RuntimeException('No se pudo comprimir la captura.');
+                }
+
+                $jpeg = ob_get_contents();
+                if ($jpeg === false) {
+                    throw new RuntimeException('No se pudo leer la captura comprimida.');
+                }
+            } finally {
+                ob_end_clean();
+            }
+        } finally {
+            imagedestroy($miniatura);
+            imagedestroy($imagen);
+        }
+
+        return 'data:image/jpeg;base64,'.base64_encode($jpeg);
     }
 }

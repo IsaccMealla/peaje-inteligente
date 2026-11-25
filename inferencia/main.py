@@ -182,7 +182,7 @@ def detectar_recorte_placa(img_bgr: np.ndarray) -> tuple[np.ndarray, float]:
     deteccion = max(detecciones_validas, key=lambda fila: float(fila[6]))
     x1, y1, x2, y2 = (float(valor) for valor in deteccion[1:5])
     pad_x = (x2 - x1) * 0.1
-    pad_y = (y2 - y1) * 0.15
+    pad_y = (y2 - y1) * 0.1
     x1 = max(0, min(ancho, int((x1 - pad_x - izquierda) / escala)))
     x2 = max(0, min(ancho, int((x2 + pad_x - izquierda) / escala)))
     y1 = max(0, min(alto, int((y1 - pad_y - arriba) / escala)))
@@ -192,6 +192,23 @@ def detectar_recorte_placa(img_bgr: np.ndarray) -> tuple[np.ndarray, float]:
         return img_bgr, 0.0
 
     return img_bgr[y1:y2, x1:x2], float(deteccion[6])
+
+
+def preparar_recorte_easyocr(recorte_bgr: np.ndarray) -> np.ndarray:
+    ampliado = cv2.resize(
+        recorte_bgr,
+        None,
+        fx=3,
+        fy=3,
+        interpolation=cv2.INTER_CUBIC,
+    )
+    luminancia, canal_a, canal_b = cv2.split(cv2.cvtColor(ampliado, cv2.COLOR_BGR2LAB))
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    luminancia = clahe.apply(luminancia)
+    return cv2.cvtColor(
+        cv2.merge((luminancia, canal_a, canal_b)),
+        cv2.COLOR_LAB2BGR,
+    )
 
 
 @app.get("/health")
@@ -234,17 +251,9 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
         recorte_placa, conf_m1 = detectar_recorte_placa(img_bgr)
 
     placa_detectada, conf_ocr = reconocer_placa_cct(recorte_placa)
-    if not placa_detectada:
-        if recorte_placa.shape[1] < 400:
-            escala_ocr = 400 / recorte_placa.shape[1]
-            recorte_placa = cv2.resize(
-                recorte_placa,
-                None,
-                fx=escala_ocr,
-                fy=escala_ocr,
-                interpolation=cv2.INTER_CUBIC,
-            )
-        lecturas = lector_ocr.readtext(recorte_placa)
+    if not placa_detectada or conf_ocr < 0.60:
+        recorte_easyocr = preparar_recorte_easyocr(recorte_placa)
+        lecturas = lector_ocr.readtext(recorte_easyocr)
         for (_, texto, prob) in lecturas:
             candidata = normalizar_placa(texto)
             if candidata and prob > conf_ocr:

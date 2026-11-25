@@ -37,7 +37,7 @@
                     @foreach($registros as $reg)
                     <tr>
                         <td class="p-4 text-slate-400">{{ $reg->created_at->format('H:i:s') }}</td>
-                        <td class="p-4"><img src="{{ asset('storage/' . $reg->imagen_url) }}" class="w-16 h-12 object-cover rounded"></td>
+                        <td class="p-4"><img src="{{ route('registros.captura', $reg) }}" class="w-16 h-12 object-cover rounded"></td>
                         <td class="p-4 font-mono font-bold text-amber-400">{{ $reg->placa_detectada ?? 'No legible' }}</td>
                         <td class="p-4 capitalize">{{ $reg->clase_vehiculo }}</td>
                         <td class="p-4 font-semibold">Bs. {{ number_format($reg->tarifa?->monto ?? 0, 2) }}</td>

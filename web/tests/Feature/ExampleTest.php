@@ -90,7 +90,43 @@ class ExampleTest extends TestCase
             ->assertJsonPath('registro.tarifa.categoria_vehiculo', 'Pesado (3+ ejes)')
             ->assertJsonPath('registro.tarifa.monto', 75);
 
+        $imagenDataUri = $response->json('registro.imagen_url');
+        $this->assertStringStartsWith('data:image/jpeg;base64,', $imagenDataUri);
+        $jpeg = base64_decode(substr($imagenDataUri, strlen('data:image/jpeg;base64,')), true);
+        $this->assertNotFalse($jpeg);
+        $dimensiones = getimagesizefromstring($jpeg);
+        $this->assertLessThanOrEqual(480, $dimensiones[0]);
+        $this->assertSame([], Storage::disk('public')->allFiles('capturas'));
+
         Http::assertSent(fn ($request) => str_contains($request->body(), 'name="imagen"'));
+    }
+
+    public function test_dashboard_capture_endpoint_serves_image_saved_in_database(): void
+    {
+        $usuario = Usuario::create([
+            'email_google' => 'captura@example.com',
+            'nombre' => 'Operador',
+            'rol' => 'operador',
+            'activo' => true,
+        ]);
+        $imagen = imagecreatetruecolor(32, 24);
+        ob_start();
+        imagejpeg($imagen);
+        $jpeg = ob_get_clean();
+        imagedestroy($imagen);
+
+        $registro = Registro::create([
+            'usuario_id' => $usuario->id,
+            'placa_detectada' => '1234ABC',
+            'imagen_url' => 'data:image/jpeg;base64,'.base64_encode($jpeg),
+            'estado' => 'revision',
+        ]);
+
+        $this->actingAs($usuario)
+            ->get(route('registros.captura', $registro))
+            ->assertOk()
+            ->assertHeader('content-type', 'image/jpeg')
+            ->assertContent($jpeg);
     }
 
     public function test_bus_uses_the_seeded_bus_tariff(): void
