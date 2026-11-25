@@ -31,22 +31,26 @@ class DatabaseSeeder extends Seeder
 
         // 2. Tarifas base del peaje
         $tarifas = [
-            ['categoria_vehiculo' => 'moto', 'monto' => 5.00, 'descripcion' => 'Motocicletas'],
-            ['categoria_vehiculo' => 'liviano', 'monto' => 15.00, 'descripcion' => 'Automóviles, vagonetas y camionetas'],
-            ['categoria_vehiculo' => 'bus', 'monto' => 30.00, 'descripcion' => 'Buses y transporte público'],
-            ['categoria_vehiculo' => 'pesado', 'monto' => 50.00, 'descripcion' => 'Camiones y transporte de carga'],
+            ['categoria_vehiculo' => 'moto', 'ejes' => 1, 'monto' => 5.00, 'descripcion' => 'Motocicletas'],
+            ['categoria_vehiculo' => 'auto', 'ejes' => 2, 'monto' => 15.00, 'descripcion' => 'Automóviles, vagonetas y camionetas'],
+            ['categoria_vehiculo' => 'minibus', 'ejes' => 2, 'monto' => 15.00, 'descripcion' => 'Minibuses'],
+            ['categoria_vehiculo' => 'bus', 'ejes' => 2, 'monto' => 30.00, 'descripcion' => 'Buses y transporte público'],
+            ['categoria_vehiculo' => 'camion', 'ejes' => 2, 'monto' => 50.00, 'descripcion' => 'Camiones de dos ejes'],
         ];
 
         foreach ($tarifas as $tarifa) {
-            Tarifa::firstOrCreate(
-                ['categoria_vehiculo' => $tarifa['categoria_vehiculo']],
-                $tarifa
+            Tarifa::updateOrCreate(
+                [
+                    'categoria_vehiculo' => $tarifa['categoria_vehiculo'],
+                    'ejes' => $tarifa['ejes'],
+                ],
+                ['monto' => $tarifa['monto'], 'descripcion' => $tarifa['descripcion']]
             );
         }
 
         Caseta::updateOrCreate(
             ['nombre' => 'Caseta principal'],
-            ['activa' => true]
+            ['ubicacion' => 'Ubicación principal', 'activa' => true]
         );
 
         $this->call(VehiculoRegistradoSeeder::class);

@@ -56,9 +56,9 @@ class ExampleTest extends TestCase
         $this->actingAs($usuario)
             ->get('/dashboard')
             ->assertOk()
-            ->assertSee('Agente Conversacional')
+            ->assertSee('Panel en Vivo')
             ->assertSee('feedUrl')
-            ->assertSee('tabla-registros');
+            ->assertSee('flujo-vehiculos');
     }
 
     public function test_processing_saves_axles_latency_and_mapped_tariff(): void
@@ -92,7 +92,7 @@ class ExampleTest extends TestCase
             ->assertJsonPath('registro.latencia_ms', 128.5)
             ->assertJsonPath('registro.pasajeros', 3)
             ->assertJsonPath('registro.clase_vehiculo', 'Pesado (3+ ejes)')
-            ->assertJsonPath('registro.tarifa.categoria_vehiculo', 'Pesado (3+ ejes)')
+            ->assertJsonPath('registro.tarifa.categoria_vehiculo', 'camion')
             ->assertJsonPath('registro.tarifa.monto', 75);
 
         $imagenDataUri = $response->json('registro.imagen_url');
@@ -289,9 +289,12 @@ class ExampleTest extends TestCase
             'saldo' => 0,
         ]);
 
-        $this->get('/pasos')->assertOk()->assertSee('Historial de pasos');
+        $this->get('/pasos')->assertOk()->assertSee('Historial de Pasos');
         $this->get('/alertas')->assertOk()->assertSee('Alertas');
         $this->get('/modelos')->assertOk()->assertSee('Estado de modelos IA');
+        $this->get('/tarifas-casetas')->assertOk()->assertSee('Tarifas Vigentes');
+        $this->get('/agente')->assertOk()->assertSee('Agente IA Peaje');
+        $this->get('/estado-inferencia')->assertOk()->assertSee('Análisis Manual por Fotografía');
         $this->get('/dashboard/feed')->assertOk()->assertJsonStructure([
             'kpis',
             'modelos' => ['m1', 'm2', 'm3', 'm4'],
@@ -349,6 +352,7 @@ class ExampleTest extends TestCase
         ]);
         Tarifa::create([
             'categoria_vehiculo' => 'bus',
+            'ejes' => 2,
             'monto' => 30,
             'descripcion' => 'Buses y transporte público',
         ]);

@@ -121,10 +121,11 @@ class PeajeApiController extends Controller
 
         $categoriaTarifa = match ($categoria) {
             'moto' => 'moto',
+            'auto' => 'auto',
             'minibus' => 'minibus',
             'bus' => 'bus',
-            'camion' => $nombreTarifa,
-            default => 'liviano',
+            'camion' => 'camion',
+            default => 'auto',
         };
         $montoTarifa = match ($categoria) {
             'moto' => 5.00,
@@ -133,9 +134,11 @@ class PeajeApiController extends Controller
             default => 15.00,
         };
 
-        $tarifa = Tarifa::where('categoria_vehiculo', $categoriaTarifa)->first()
+        $tarifa = Tarifa::where('categoria_vehiculo', $categoriaTarifa)
+            ->where('ejes', $ejes)
+            ->first()
             ?? Tarifa::firstOrCreate(
-                ['categoria_vehiculo' => $categoriaTarifa],
+                ['categoria_vehiculo' => $categoriaTarifa, 'ejes' => $ejes],
                 ['monto' => $montoTarifa]
             );
 

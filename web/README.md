@@ -7,6 +7,23 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## Sistema Inteligente de Control de Peaje
+
+La aplicación web incluye un panel SaaS con navegación a:
+
+- `/dashboard`: tránsitos y alertas en vivo (polling cada dos segundos).
+- `/vehiculos`, `/pasos` y `/alertas`: padrón vehicular, historial filtrable y atención de incidencias.
+- `/tarifas-casetas`: lectura para operadores y CRUD de tarifas por categoría/ejes y casetas para administradores.
+- `/usuarios-oauth`: lista blanca Google OAuth, visible y administrable solo por usuarios `admin`.
+- `/agente`: consultas por placa, consultas operativas y análisis de hasta cinco fotografías por envío.
+- `/estado-inferencia`: disponibilidad de M1–M4 y prueba manual de fotografías.
+
+El contenedor web ejecuta `php artisan migrate --force --seed` al iniciar. Para validar cambios localmente:
+
+```powershell
+php artisan test
+```
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

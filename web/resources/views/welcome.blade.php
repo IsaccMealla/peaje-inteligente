@@ -6,12 +6,13 @@
     <title>Peaje Inteligente - Acceso</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-white flex items-center justify-center min-h-screen">
-    <div class="bg-slate-800 p-8 rounded-xl shadow-lg max-w-md w-full text-center border border-slate-700">
-        <h1 class="text-2xl font-bold mb-2">Sistema de Peaje Inteligente</h1>
-        <p class="text-slate-400 text-sm mb-6">Panel de monitoreo y control vehicular con IA</p>
+<body class="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-slate-900">
+    <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-xl shadow-slate-200/60">
+        <span class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-bold text-white">P</span>
+        <h1 class="mb-2 text-2xl font-bold">Sistema de Peaje Inteligente</h1>
+        <p class="mb-6 text-sm text-slate-500">Panel de monitoreo y control vehicular con IA</p>
         <a href="{{ route('google.redirect') }}"
-           class="inline-flex items-center justify-center w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition">
+           class="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700">
             Iniciar sesión con Google
         </a>
     </div>

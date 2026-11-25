@@ -7,4 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 class Tarifa extends Model
 {
     protected $guarded = [];
+
+    protected function casts(): array
+    {
+        return [
+            'ejes' => 'integer',
+        ];
+    }
 }

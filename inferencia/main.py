@@ -81,11 +81,38 @@ MAPEO_CATEGORIAS = {
 
 def normalizar_placa(texto: str) -> str:
     limpio = re.sub(r"[^A-Z0-9]", "", texto.upper())
-    if re.match(r"^[0-9]{3,4}[A-Z]{3}$", limpio) or (
-        5 <= len(limpio) <= 8 and any(c.isdigit() for c in limpio) and any(c.isalpha() for c in limpio)
-    ):
+    if re.fullmatch(r"[0-9]{3,4}[A-Z]{3}", limpio):
         return limpio
-    return ""
+
+    alternativas = {
+        "O": "0",
+        "0": "O",
+        "I": "1",
+        "1": "I",
+        "B": "8",
+        "8": "B",
+        "S": "5",
+        "5": "S",
+    }
+    if len(limpio) not in (6, 7):
+        return ""
+
+    candidatos = [(limpio, 0)]
+    for indice, caracter in enumerate(limpio):
+        alternativa = alternativas.get(caracter)
+        if alternativa:
+            candidatos.extend(
+                (texto[:indice] + alternativa + texto[indice + 1 :], cambios + 1)
+                for texto, cambios in list(candidatos)
+                if cambios < 2
+            )
+
+    validos = [
+        (candidato, cambios)
+        for candidato, cambios in candidatos
+        if re.fullmatch(r"[0-9]{3,4}[A-Z]{3}", candidato)
+    ]
+    return min(validos, key=lambda candidato: candidato[1])[0] if validos else ""
 
 
 def reconocer_placa_cct(recorte_bgr: np.ndarray) -> tuple[str | None, float]:
@@ -142,7 +169,7 @@ def contar_ejes_desde_keypoints(res_m3, categoria: str) -> int:
     return max(1, ejes) if categoria == "moto" else max(2, ejes)
 
 
-def detectar_recorte_placa(img_bgr: np.ndarray) -> tuple[np.ndarray, float]:
+def detectar_recortes_placa(img_bgr: np.ndarray) -> list[tuple[np.ndarray, float]]:
     alto, ancho = img_bgr.shape[:2]
     escala = min(384 / ancho, 384 / alto)
     ancho_redimensionado = round(ancho * escala)
@@ -178,32 +205,35 @@ def detectar_recorte_placa(img_bgr: np.ndarray) -> tuple[np.ndarray, float]:
     detecciones_validas = [
         deteccion
         for deteccion in detecciones
-        if deteccion[6] > 0 and int(deteccion[5]) == 0
+        if deteccion[6] >= 0.25 and int(deteccion[5]) == 0
     ]
     if not detecciones_validas:
-        return img_bgr, 0.0
+        return []
 
-    deteccion = max(detecciones_validas, key=lambda fila: float(fila[6]))
-    x1, y1, x2, y2 = (float(valor) for valor in deteccion[1:5])
-    pad_x = (x2 - x1) * 0.1
-    pad_y = (y2 - y1) * 0.1
-    x1 = max(0, min(ancho, int((x1 - pad_x - izquierda) / escala)))
-    x2 = max(0, min(ancho, int((x2 + pad_x - izquierda) / escala)))
-    y1 = max(0, min(alto, int((y1 - pad_y - arriba) / escala)))
-    y2 = max(0, min(alto, int((y2 + pad_y - arriba) / escala)))
+    recortes = []
+    for deteccion in sorted(detecciones_validas, key=lambda fila: float(fila[6]), reverse=True):
+        x1, y1, x2, y2 = (float(valor) for valor in deteccion[1:5])
+        pad_x = (x2 - x1) * 0.1
+        pad_y = (y2 - y1) * 0.1
+        x1 = max(0, min(ancho, int((x1 - pad_x - izquierda) / escala)))
+        x2 = max(0, min(ancho, int((x2 + pad_x - izquierda) / escala)))
+        y1 = max(0, min(alto, int((y1 - pad_y - arriba) / escala)))
+        y2 = max(0, min(alto, int((y2 + pad_y - arriba) / escala)))
 
-    if x2 <= x1 or y2 <= y1:
-        return img_bgr, 0.0
+        if x2 > x1 and y2 > y1:
+            recortes.append((img_bgr[y1:y2, x1:x2], float(deteccion[6])))
 
-    return img_bgr[y1:y2, x1:x2], float(deteccion[6])
+    return recortes
 
 
 def preparar_recorte_easyocr(recorte_bgr: np.ndarray) -> np.ndarray:
+    alto, ancho = recorte_bgr.shape[:2]
+    escala = min(3, 1800 / max(alto, ancho))
     ampliado = cv2.resize(
         recorte_bgr,
         None,
-        fx=3,
-        fy=3,
+        fx=escala,
+        fy=escala,
         interpolation=cv2.INTER_CUBIC,
     )
     luminancia, canal_a, canal_b = cv2.split(cv2.cvtColor(ampliado, cv2.COLOR_BGR2LAB))
@@ -255,19 +285,35 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
 
     # --- M1: Detección de placa (YOLO-v9 ONNX) + OCR ---
     inicio_m1 = time.perf_counter()
-    recorte_placa, conf_m1 = detectar_recorte_placa(recorte_vehiculo)
-    if conf_m1 <= 0 and recorte_vehiculo.shape != img_bgr.shape:
-        recorte_placa, conf_m1 = detectar_recorte_placa(img_bgr)
+    candidatos_recorte = detectar_recortes_placa(img_bgr)
+    if recorte_vehiculo.shape != img_bgr.shape:
+        candidatos_recorte.extend(detectar_recortes_placa(recorte_vehiculo))
+    candidatos_recorte.sort(key=lambda candidato: candidato[1], reverse=True)
+    confianza_detector = candidatos_recorte[0][1] if candidatos_recorte else 0.0
 
-    placa_detectada, conf_ocr = reconocer_placa_cct(recorte_placa)
-    if not placa_detectada or conf_ocr < 0.60:
-        recorte_easyocr = preparar_recorte_easyocr(recorte_placa)
-        lecturas = lector_ocr.readtext(recorte_easyocr)
-        for (_, texto, prob) in lecturas:
-            candidata = normalizar_placa(texto)
-            if candidata and prob > conf_ocr:
-                placa_detectada = candidata
-                conf_ocr = float(prob)
+    placa_detectada = None
+    conf_ocr = 0.0
+    recortes_ocr = [recorte for recorte, _ in candidatos_recorte[:5]]
+    if not recortes_ocr or all(recorte.shape != recorte_vehiculo.shape for recorte in recortes_ocr):
+        recortes_ocr.append(recorte_vehiculo)
+
+    for recorte_placa in recortes_ocr:
+        candidata_cct, confianza_cct = reconocer_placa_cct(recorte_placa)
+        if candidata_cct and confianza_cct > conf_ocr:
+            placa_detectada = candidata_cct
+            conf_ocr = confianza_cct
+
+        if not placa_detectada or conf_ocr < 0.80:
+            recorte_easyocr = preparar_recorte_easyocr(recorte_placa)
+            lecturas = lector_ocr.readtext(
+                recorte_easyocr,
+                allowlist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            )
+            for _, texto, probabilidad in lecturas:
+                candidata = normalizar_placa(texto)
+                if candidata and float(probabilidad) > conf_ocr:
+                    placa_detectada = candidata
+                    conf_ocr = float(probabilidad)
     latencia_m1_ms = round((time.perf_counter() - inicio_m1) * 1000, 2)
 
     # --- M3: Keypoints sobre las ruedas (Número de ejes) ---
@@ -292,16 +338,17 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
         }
     )
 
-    if placa_detectada:
-        confianza = round((conf_m2 + conf_ocr) / 2, 4)
-    else:
-        confianza = round(conf_m2 * 0.5, 4)
+    confianza = round(conf_ocr, 4)
 
     latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
 
     return {
         "placa": placa_detectada,
         "confianza": confianza,
+        "confianza_ocr": round(conf_ocr, 4),
+        "confianza_detector_placa": round(confianza_detector, 4),
+        "candidatos_placa": len(candidatos_recorte),
+        "confianza_vehiculo": round(conf_m2, 4),
         "categoria": categoria,
         "ejes": ejes,
         "pasajeros": pasajeros,

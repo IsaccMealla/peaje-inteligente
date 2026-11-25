@@ -3,9 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Models\Registro;
+use App\Models\Tarifa;
 use App\Models\VehiculoRegistrado;
+use App\Services\InferenceHealthService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\View\View;
 
 class AgenteController extends Controller
 {
@@ -24,6 +30,85 @@ class AgenteController extends Controller
         ]);
     }
 
+    public function pagina(): View
+    {
+        return view('agente', ['historial' => session('agente_historial', [])]);
+    }
+
+    public function nuevaSesion(): RedirectResponse
+    {
+        session()->forget('agente_historial');
+
+        return redirect()->route('agente.index')->with('estado', 'Se inició una nueva sesión.');
+    }
+
+    public function chatWeb(Request $request, InferenceHealthService $health): JsonResponse
+    {
+        $validated = $request->validate([
+            'mensaje' => ['nullable', 'string', 'max:1000'],
+            'imagenes' => ['nullable', 'array', 'max:5'],
+            'imagenes.*' => ['image', 'max:5120'],
+        ]);
+        $mensaje = trim($validated['mensaje'] ?? '');
+        $imagenes = $request->file('imagenes', []);
+
+        if ($mensaje === '' && $imagenes === []) {
+            return response()->json(['mensaje' => 'Escribe una consulta o adjunta una fotografía.'], 422);
+        }
+
+        $resultados = [];
+        if ($imagenes !== []) {
+            foreach ($imagenes as $imagen) {
+                $consulta = $this->consultar(Request::create(
+                    '/agente/consultar',
+                    'POST',
+                    [],
+                    [],
+                    ['imagen' => $imagen]
+                ));
+                $resultado = $consulta->getData(true);
+                $resultados[] = [
+                    'archivo' => $imagen->getClientOriginalName(),
+                    ...$resultado,
+                ];
+            }
+            $respuesta = collect($resultados)->map(function (array $resultado): string {
+                $analisis = $resultado['analisis'] ?? [];
+                $placa = $analisis['placa'] ?? $resultado['placa'] ?? 'No legible';
+
+                return "{$resultado['archivo']}: {$resultado['estado']} — placa {$placa}; ".
+                    ($analisis['categoria'] ?? 'categoría no disponible').', '.
+                    ($analisis['ejes'] ?? '—').' ejes, '.
+                    ($analisis['pasajeros'] ?? '—').' pasajeros, OCR '.
+                    round((float) ($analisis['confianza_ocr'] ?? 0) * 100).'% y tarifa '.
+                    (isset($analisis['tarifa']) ? 'Bs. '.number_format((float) $analisis['tarifa'], 2) : 'no configurada').
+                    '. '.$resultado['mensaje'];
+            })->implode("\n");
+        } else {
+            $respuesta = $this->responderConsultaRapida($mensaje, $health);
+        }
+
+        $historial = session('agente_historial', []);
+        $historial[] = [
+            'rol' => 'user',
+            'contenido' => $mensaje !== '' ? $mensaje : 'Análisis de '.count($imagenes).' fotografía(s)',
+            'hora' => now()->timezone('America/La_Paz')->format('H:i'),
+        ];
+        $historial[] = [
+            'rol' => 'assistant',
+            'contenido' => $respuesta,
+            'hora' => now()->timezone('America/La_Paz')->format('H:i'),
+        ];
+        $historial = array_slice($historial, -40);
+        session()->put('agente_historial', $historial);
+
+        return response()->json([
+            'respuesta' => $respuesta,
+            'resultados' => $resultados,
+            'historial' => $historial,
+        ]);
+    }
+
     public function consultar(Request $request)
     {
         $validated = $request->validate([
@@ -33,6 +118,7 @@ class AgenteController extends Controller
 
         $placaCruda = $validated['texto'] ?? null;
         $origen = 'texto';
+        $analisis = [];
 
         if ($request->hasFile('imagen')) {
             $origen = 'imagen';
@@ -62,11 +148,31 @@ class AgenteController extends Controller
                     ], 502);
                 }
 
-                $placaCruda = $response->json('placa');
+                $datosInferencia = $response->json();
+                $placaCruda = $datosInferencia['placa'] ?? null;
+                $analisis = [
+                    'analisis' => [
+                        'placa' => $placaCruda,
+                        'confianza_ocr' => (float) ($datosInferencia['confianza_ocr'] ?? $datosInferencia['confianza'] ?? 0),
+                        'categoria' => $datosInferencia['categoria'] ?? null,
+                        'ejes' => (int) ($datosInferencia['ejes'] ?? 0),
+                        'pasajeros' => (int) ($datosInferencia['pasajeros'] ?? 0),
+                        'latencia' => $datosInferencia['latencia'] ?? null,
+                        'latencia_modelos' => $datosInferencia['latencia_modelos'] ?? [],
+                    ],
+                ];
+                $categoriaTarifa = match ($analisis['analisis']['categoria']) {
+                    'moto', 'auto', 'minibus', 'bus', 'camion' => $analisis['analisis']['categoria'],
+                    default => 'auto',
+                };
+                $analisis['analisis']['tarifa'] = Tarifa::where('categoria_vehiculo', $categoriaTarifa)
+                    ->where('ejes', $analisis['analisis']['ejes'])
+                    ->value('monto');
                 if (empty($placaCruda)) {
                     return response()->json([
                         'estado' => 'Imagen no legible',
                         'mensaje' => 'No se encontró una placa legible. Envía una foto más nítida o escribe la placa.',
+                        ...$analisis,
                     ]);
                 }
             } catch (\Throwable $exception) {
@@ -93,6 +199,7 @@ class AgenteController extends Controller
                 'estado' => 'Formato inválido',
                 'placa_normalizada' => $placa,
                 'mensaje' => "La placa '{$placa}' no tiene un formato válido (por ejemplo, 4021XYZ o 123ABC).",
+                ...$analisis,
             ]);
         }
 
@@ -140,6 +247,7 @@ class AgenteController extends Controller
                 'origen' => $origen,
                 'mensaje' => "La placa {$placa} está en el padrón (propietario: {$registrado->propietario}). Tiene {$pasos->count()} paso(s); el más reciente fue {$fecha}. Caseta: {$caseta}. Categoría: {$categoria}. Monto: {$monto}.",
                 'sugerencias' => [],
+                ...$analisis,
             ]);
         }
 
@@ -150,6 +258,7 @@ class AgenteController extends Controller
                 'origen' => $origen,
                 'mensaje' => "La placa {$placa} está en el padrón (propietario: {$registrado->propietario}, categoría: {$registrado->categoria}), pero no tiene pasos registrados.",
                 'sugerencias' => [],
+                ...$analisis,
             ]);
         }
 
@@ -165,6 +274,7 @@ class AgenteController extends Controller
                 'origen' => $origen,
                 'mensaje' => "La placa {$placa} aparece en {$pasos->count()} paso(s), el más reciente el {$fecha}, pero no figura en el padrón vehicular.",
                 'sugerencias' => [],
+                ...$analisis,
             ]);
         }
 
@@ -179,7 +289,57 @@ class AgenteController extends Controller
             'origen' => $origen,
             'mensaje' => $mensaje,
             'sugerencias' => $sugerencias,
+            ...$analisis,
         ]);
+    }
+
+    private function responderConsultaRapida(string $mensaje, InferenceHealthService $health): string
+    {
+        $consulta = mb_strtolower($mensaje);
+        if (str_contains($consulta, 'tarifa')) {
+            return Tarifa::whereIn('categoria_vehiculo', ['moto', 'auto', 'minibus', 'bus', 'camion'])
+                ->orderBy('categoria_vehiculo')
+                ->orderBy('ejes')
+                ->get()
+                ->map(fn (Tarifa $tarifa): string => ucfirst($tarifa->categoria_vehiculo)." ({$tarifa->ejes} ejes): Bs. ".
+                    number_format((float) $tarifa->monto, 2))
+                ->implode("\n") ?: 'No hay tarifas configuradas todavía.';
+        }
+
+        if (str_contains($consulta, 'resumen') || str_contains($consulta, 'operativo')) {
+            $hoy = now()->toDateString();
+            $pasos = Registro::whereDate('created_at', $hoy)->count();
+            $recaudacion = DB::table('registros')
+                ->join('tarifas', 'registros.tarifa_id', '=', 'tarifas.id')
+                ->whereDate('registros.created_at', $hoy)
+                ->sum('tarifas.monto');
+            $alertas = DB::table('alertas')->where('leida', false)->count();
+
+            return "Resumen de hoy: {$pasos} tránsitos, Bs. ".number_format((float) $recaudacion, 2).
+                " recaudados y {$alertas} alerta(s) pendiente(s).";
+        }
+
+        if (str_contains($consulta, 'alerta')) {
+            $alertas = DB::table('alertas')->where('leida', false)->count();
+
+            return "Hay {$alertas} alerta(s) pendiente(s). Revisa la sección Alertas para atenderlas.";
+        }
+
+        if (str_contains($consulta, 'modelo') || str_contains($consulta, 'm1') || str_contains($consulta, 'm4')) {
+            return collect($health->status())
+                ->map(fn (array $modelo): string => $modelo['nombre'].': '.$modelo['estado'].
+                    ($modelo['latencia_ms'] === null ? '' : " ({$modelo['latencia_ms']} ms)"))
+                ->implode("\n");
+        }
+
+        preg_match('/[A-Z0-9]{6,7}/', strtoupper($mensaje), $coincidencia);
+        if (isset($coincidencia[0])) {
+            $consulta = Request::create('/agente/consultar', 'POST', ['texto' => $coincidencia[0]]);
+
+            return $this->consultar($consulta)->getData(true)['mensaje'];
+        }
+
+        return 'Puedo consultar una placa o ayudarte con tarifas, el resumen operativo, alertas pendientes y el estado de M1–M4. También puedes adjuntar hasta cinco fotografías.';
     }
 
     private function normalizarPlaca(string $texto): string

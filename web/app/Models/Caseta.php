@@ -8,6 +8,7 @@ class Caseta extends Model
 {
     protected $fillable = [
         'nombre',
+        'ubicacion',
         'activa',
     ];
 }
