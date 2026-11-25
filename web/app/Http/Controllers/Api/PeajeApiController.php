@@ -64,25 +64,34 @@ class PeajeApiController extends Controller
 
         // 1. Guardar imagen en storage/app/public/capturas
         $rutaImagen = $request->file('imagen')->store('capturas', 'public');
-        $rutaCompleta = storage_path('app/public/' . $rutaImagen);
 
         // 2. Enviar imagen al microservicio de IA (FastAPI)
         $iaUrl = rtrim(config('services.ia.url'), '/') . '/inferir';
         $placa = null;
-        $clase = 'liviano';
+        $categoria = 'auto';
+        $ejes = 2;
         $confianza = 0.0;
+        $latencia = null;
         $estado = 'procesado';
 
         try {
             $iaResponse = Http::timeout(15)
-                ->attach('file', file_get_contents($rutaCompleta), basename($rutaCompleta))
+                ->attach(
+                    'file',
+                    file_get_contents($request->file('imagen')->getRealPath()),
+                    basename($rutaImagen)
+                )
                 ->post($iaUrl);
 
             if ($iaResponse->successful()) {
                 $resultado = $iaResponse->json();
                 $placa = $resultado['placa'] ?? null;
-                $clase = strtolower($resultado['clase'] ?? 'liviano');
+                $categoria = strtolower($resultado['categoria'] ?? 'auto');
+                $ejes = (int) ($resultado['ejes'] ?? 2);
                 $confianza = (float) ($resultado['confianza'] ?? 0.0);
+                $latencia = isset($resultado['latencia'])
+                    ? (float) $resultado['latencia']
+                    : null;
             } else {
                 $estado = 'revision';
             }
@@ -91,8 +100,23 @@ class PeajeApiController extends Controller
         }
 
         // 3. Buscar tarifa correspondiente y guardar registro
-        $tarifa = Tarifa::where('categoria_vehiculo', $clase)->first()
-            ?? Tarifa::where('categoria_vehiculo', 'liviano')->first();
+        $nombreTarifa = match ($categoria) {
+            'moto' => 'Motocicleta',
+            'minibus' => 'Minibús',
+            'bus' => 'Bus',
+            'camion' => $ejes >= 3 ? 'Pesado (3+ ejes)' : 'Pesado (2 ejes)',
+            default => 'Liviano',
+        };
+
+        $tarifa = Tarifa::where('categoria_vehiculo', $nombreTarifa)->first()
+            ?? Tarifa::firstOrCreate(
+                ['categoria_vehiculo' => $nombreTarifa],
+                [
+                    'monto' => $categoria === 'camion'
+                        ? 25.00 * max(1, $ejes - 1)
+                        : 15.00,
+                ]
+            );
 
         if ($confianza < 0.60 || empty($placa)) {
             $estado = 'revision';
@@ -102,8 +126,10 @@ class PeajeApiController extends Controller
             'usuario_id' => $request->user()->id,
             'tarifa_id' => $tarifa?->id,
             'placa_detectada' => $placa,
-            'clase_vehiculo' => $clase,
+            'clase_vehiculo' => $nombreTarifa,
+            'ejes' => $ejes,
             'confianza' => $confianza,
+            'latencia_ms' => $latencia,
             'imagen_url' => $rutaImagen,
             'estado' => $estado,
         ]);

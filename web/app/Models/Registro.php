@@ -6,7 +6,17 @@ use Illuminate\Database\Eloquent\Model;
 
 class Registro extends Model
 {
-    protected $guarded = [];
+    protected $fillable = [
+        'usuario_id',
+        'tarifa_id',
+        'placa_detectada',
+        'clase_vehiculo',
+        'ejes',
+        'confianza',
+        'latencia_ms',
+        'imagen_url',
+        'estado',
+    ];
 
     public function tarifa()
     {

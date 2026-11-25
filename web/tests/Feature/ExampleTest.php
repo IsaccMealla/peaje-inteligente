@@ -6,6 +6,9 @@ use App\Models\Registro;
 use App\Models\Tarifa;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
@@ -51,5 +54,38 @@ class ExampleTest extends TestCase
             ->get('/dashboard')
             ->assertOk()
             ->assertSee('1234ABC');
+    }
+
+    public function test_processing_saves_axles_latency_and_mapped_tariff(): void
+    {
+        Storage::fake('public');
+        Http::fake([
+            'http://localhost:8000/inferir' => Http::response([
+                'placa' => '1234ABC',
+                'confianza' => 0.95,
+                'categoria' => 'camion',
+                'ejes' => 4,
+                'latencia' => 128.5,
+            ]),
+        ]);
+
+        $usuario = Usuario::create([
+            'email_google' => 'operador@example.com',
+            'nombre' => 'Operador',
+            'rol' => 'operador',
+            'activo' => true,
+        ]);
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/procesar', [
+                'imagen' => UploadedFile::fake()->image('vehiculo.jpg'),
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('registro.ejes', 4)
+            ->assertJsonPath('registro.latencia_ms', 128.5)
+            ->assertJsonPath('registro.clase_vehiculo', 'Pesado (3+ ejes)')
+            ->assertJsonPath('registro.tarifa.categoria_vehiculo', 'Pesado (3+ ejes)')
+            ->assertJsonPath('registro.tarifa.monto', 75);
     }
 }
