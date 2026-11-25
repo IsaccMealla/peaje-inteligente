@@ -23,7 +23,7 @@ class DatabaseSeeder extends Seeder
         Usuario::updateOrCreate(
             ['email_google' => 'doc.alvaro.pinto.ma@unifranz.edu.bo'],
             [
-                'nombre' => 'Administrador',
+                'nombre' => 'Ing. Alvaro Pinto (Docente)',
                 'rol' => 'admin',
                 'activo' => true,
             ]

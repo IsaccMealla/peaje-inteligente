@@ -8,7 +8,7 @@ import numpy as np
 import onnxruntime as ort
 import yaml
 from fastapi import FastAPI, File, UploadFile
-from PIL import Image
+from PIL import Image, ImageOps
 from ultralytics import YOLO
 
 app = FastAPI(title="Microservicio IA - Peaje Inteligente (M1 + M2 + M3 + M4)")
@@ -233,7 +233,7 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
     inicio = time.perf_counter()
 
     contenido = await imagen.read()
-    pil_img = Image.open(io.BytesIO(contenido)).convert("RGB")
+    pil_img = ImageOps.exif_transpose(Image.open(io.BytesIO(contenido))).convert("RGB")
     img_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
     # --- M2: Segmentación de instancias (Categoría del vehículo) ---

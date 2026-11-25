@@ -210,6 +210,43 @@ class _CamaraScreenState extends State<CamaraScreen> {
     }
   }
 
+  Future<void> _registrarPasoConFoto() async {
+    if (_casetaActiva) _detenerCaseta();
+    final controller = _controller;
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        _enviando ||
+        _consultando ||
+        controller.value.isTakingPicture) {
+      return;
+    }
+
+    setState(() {
+      _enviando = true;
+      _respuestaConsulta = null;
+    });
+    try {
+      final foto = await controller.takePicture();
+      final respuesta = await _enviarFoto(
+        foto,
+        endpoint: '/api/v1/pasos/frame',
+      );
+      final paso = respuesta['paso'] as Map<String, dynamic>?;
+      if (mounted) {
+        setState(() => _ultimoRegistro = paso);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Paso registrado y enviado al panel en tiempo real'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) _mostrarError(error);
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
+
   void _mostrarError(Object error) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
@@ -296,7 +333,7 @@ class _CamaraScreenState extends State<CamaraScreen> {
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: CameraPreview(_controller!),
+      child: Center(child: CameraPreview(_controller!)),
     );
   }
 
@@ -437,11 +474,35 @@ class _CamaraScreenState extends State<CamaraScreen> {
                       ? null
                       : _consultarConFoto,
                   icon: const Icon(Icons.camera_alt),
-                  label: const Text('Tomar foto'),
+                  label: const Text('Consultar con foto'),
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: !_camaraLista || _consultando || _enviando
+                  ? null
+                  : _registrarPasoConFoto,
+              icon: const Icon(Icons.add_a_photo_outlined),
+              label: const Text('Registrar paso con foto'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.green.shade700,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              'La consulta solo busca la placa. Registrar paso crea un registro visible en el panel en tiempo real.',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          if (_ultimoRegistro != null) _tarjetaResultado(_ultimoRegistro!),
           if (_consultando)
             const Padding(
               padding: EdgeInsets.all(20),

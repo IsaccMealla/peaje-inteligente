@@ -5,6 +5,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BackofficeController;
 use App\Http\Controllers\DashboardLiveController;
 use App\Http\Controllers\RegistroController;
+use App\Http\Controllers\UsuarioOAuthController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -30,4 +31,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::post('/agente/consultar', [AgenteController::class, 'consultar'])
         ->name('agente.consultar');
+
+    Route::middleware('admin')->group(function () {
+        Route::get('/usuarios-oauth', [UsuarioOAuthController::class, 'index'])->name('usuarios-oauth.index');
+        Route::post('/usuarios-oauth', [UsuarioOAuthController::class, 'store'])->name('usuarios-oauth.store');
+        Route::put('/usuarios-oauth/{usuario}', [UsuarioOAuthController::class, 'update'])->name('usuarios-oauth.update');
+        Route::patch('/usuarios-oauth/{usuario}/toggle', [UsuarioOAuthController::class, 'toggle'])->name('usuarios-oauth.toggle');
+        Route::delete('/usuarios-oauth/{usuario}', [UsuarioOAuthController::class, 'destroy'])->name('usuarios-oauth.destroy');
+    });
 });

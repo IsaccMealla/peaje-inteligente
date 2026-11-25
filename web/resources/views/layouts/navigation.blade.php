@@ -10,6 +10,9 @@
             <a href="{{ route('pasos.index') }}" class="rounded-lg px-3 py-2 {{ request()->routeIs('pasos.*') ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700' }}">Pasos</a>
             <a href="{{ route('alertas.index') }}" class="rounded-lg px-3 py-2 {{ request()->routeIs('alertas.*') ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700' }}">Alertas</a>
             <a href="{{ route('modelos.index') }}" class="rounded-lg px-3 py-2 {{ request()->routeIs('modelos.*') ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700' }}">Modelos M1–M4</a>
+            @if(auth()->user()->rol === 'admin')
+                <a href="{{ route('usuarios-oauth.index') }}" class="rounded-lg px-3 py-2 {{ request()->routeIs('usuarios-oauth.*') ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700' }}">Usuarios &amp; OAuth</a>
+            @endif
         </nav>
         <div class="flex items-center gap-3">
             <span class="text-sm text-slate-400">{{ auth()->user()->nombre }}</span>

@@ -67,7 +67,10 @@ class PeajeApiController extends Controller
 
         $archivoImagen = $request->file('imagen');
         $contenidoImagen = file_get_contents($archivoImagen->getRealPath());
-        $imagenDataUri = $this->crearMiniaturaDataUri($contenidoImagen);
+        $imagenDataUri = $this->crearMiniaturaDataUri(
+            $contenidoImagen,
+            $archivoImagen->getRealPath()
+        );
 
         // 2. Enviar imagen al microservicio de IA (FastAPI)
         $iaUrl = rtrim(config('services.ia.url'), '/').'/inferir';
@@ -221,7 +224,7 @@ class PeajeApiController extends Controller
         return response()->json($respuesta);
     }
 
-    private function crearMiniaturaDataUri(string $contenido): string
+    private function crearMiniaturaDataUri(string $contenido, string $ruta): string
     {
         if (! function_exists('imagecreatefromstring')) {
             throw new RuntimeException('La extensión GD es necesaria para procesar capturas.');
@@ -230,6 +233,25 @@ class PeajeApiController extends Controller
         $imagen = @imagecreatefromstring($contenido);
         if ($imagen === false) {
             throw new RuntimeException('No se pudo decodificar la imagen recibida.');
+        }
+
+        if (function_exists('exif_read_data')) {
+            $metadatos = @exif_read_data($ruta);
+            $rotacion = match ((int) ($metadatos['Orientation'] ?? 1)) {
+                3 => 180,
+                6 => -90,
+                8 => 90,
+                default => null,
+            };
+            if ($rotacion !== null) {
+                $imagenOrientada = imagerotate($imagen, $rotacion, 0);
+                if ($imagenOrientada === false) {
+                    imagedestroy($imagen);
+                    throw new RuntimeException('No se pudo orientar la captura.');
+                }
+                imagedestroy($imagen);
+                $imagen = $imagenOrientada;
+            }
         }
 
         $ancho = imagesx($imagen);
