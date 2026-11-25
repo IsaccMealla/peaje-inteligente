@@ -1,4 +1,3 @@
-import glob
 import io
 import os
 import re
@@ -6,21 +5,33 @@ import time
 import cv2
 import easyocr
 import numpy as np
+import onnxruntime as ort
 from fastapi import FastAPI, File, UploadFile
 from PIL import Image
 from ultralytics import YOLO
 
 app = FastAPI(title="Microservicio IA - Peaje Inteligente (M1 + M2 + M3)")
 
-# Buscar automáticamente el archivo .onnx de placas en modelos/
-archivos_m1 = glob.glob("modelos/yolo-v9-t-384-license-plates*.onnx")
-PATH_M1_PLACA = archivos_m1[0] if archivos_m1 else "modelos/placa_m1.onnx"
-PATH_M2_SEG = "modelos/m2_vehiculos.pt"
-PATH_M3_POSE = "modelos/m3_llantas.pt"
+DIRECTORIO_MODELOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modelos")
+PATH_M1_PLACA = os.path.join(
+    DIRECTORIO_MODELOS,
+    "yolo-v9-t-384-license-plates-end2end.onnx",
+)
+PATH_M2_SEG = os.path.join(DIRECTORIO_MODELOS, "m2_vehiculos.pt")
+PATH_M3_POSE = os.path.join(DIRECTORIO_MODELOS, "m3_llantas.pt")
 
-modelo_m1 = YOLO(PATH_M1_PLACA, task="detect") if os.path.exists(PATH_M1_PLACA) else None
-modelo_m2 = YOLO(PATH_M2_SEG) if os.path.exists(PATH_M2_SEG) else YOLO("yolov8n-seg.pt")
-modelo_m3 = YOLO(PATH_M3_POSE) if os.path.exists(PATH_M3_POSE) else None
+for ruta_modelo in (PATH_M1_PLACA, PATH_M2_SEG, PATH_M3_POSE):
+    if not os.path.isfile(ruta_modelo):
+        raise FileNotFoundError(f"No se encontró el peso requerido: {ruta_modelo}")
+
+sesion_m1 = ort.InferenceSession(
+    PATH_M1_PLACA,
+    providers=["CPUExecutionProvider"],
+)
+nombre_entrada_m1 = sesion_m1.get_inputs()[0].name
+nombre_salida_m1 = sesion_m1.get_outputs()[0].name
+modelo_m2 = YOLO(PATH_M2_SEG)
+modelo_m3 = YOLO(PATH_M3_POSE)
 
 lector_ocr = easyocr.Reader(["es", "en"], gpu=False)
 
@@ -73,13 +84,67 @@ def contar_ejes_desde_keypoints(res_m3, categoria: str) -> int:
     return max(1, ejes) if categoria == "moto" else max(2, ejes)
 
 
+def detectar_recorte_placa(img_bgr: np.ndarray) -> tuple[np.ndarray, float]:
+    alto, ancho = img_bgr.shape[:2]
+    escala = min(384 / ancho, 384 / alto)
+    ancho_redimensionado = round(ancho * escala)
+    alto_redimensionado = round(alto * escala)
+    imagen_redimensionada = cv2.resize(
+        img_bgr,
+        (ancho_redimensionado, alto_redimensionado),
+        interpolation=cv2.INTER_LINEAR,
+    )
+
+    pad_x = (384 - ancho_redimensionado) / 2
+    pad_y = (384 - alto_redimensionado) / 2
+    izquierda = round(pad_x - 0.1)
+    derecha = round(pad_x + 0.1)
+    arriba = round(pad_y - 0.1)
+    abajo = round(pad_y + 0.1)
+    imagen_entrada = cv2.copyMakeBorder(
+        imagen_redimensionada,
+        arriba,
+        abajo,
+        izquierda,
+        derecha,
+        cv2.BORDER_CONSTANT,
+        value=(114, 114, 114),
+    )
+    imagen_entrada = cv2.cvtColor(imagen_entrada, cv2.COLOR_BGR2RGB)
+    tensor = np.transpose(imagen_entrada, (2, 0, 1))[None].astype(np.float32) / 255
+    detecciones = sesion_m1.run(
+        [nombre_salida_m1],
+        {nombre_entrada_m1: tensor},
+    )[0].reshape(-1, 7)
+
+    detecciones_validas = [
+        deteccion
+        for deteccion in detecciones
+        if deteccion[6] > 0 and int(deteccion[0]) == 0
+    ]
+    if not detecciones_validas:
+        return img_bgr, 0.0
+
+    deteccion = max(detecciones_validas, key=lambda fila: float(fila[6]))
+    x1, y1, x2, y2 = (float(valor) for valor in deteccion[1:5])
+    x1 = max(0, min(ancho, int((x1 - izquierda) / escala)))
+    x2 = max(0, min(ancho, int((x2 - izquierda) / escala)))
+    y1 = max(0, min(alto, int((y1 - arriba) / escala)))
+    y2 = max(0, min(alto, int((y2 - arriba) / escala)))
+
+    if x2 <= x1 or y2 <= y1:
+        return img_bgr, 0.0
+
+    return img_bgr[y1:y2, x1:x2], float(deteccion[6])
+
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "m1_placa": os.path.basename(PATH_M1_PLACA) if modelo_m1 else None,
-        "m2_vehiculos": os.path.exists(PATH_M2_SEG),
-        "m3_llantas": modelo_m3 is not None,
+        "m1_placa": os.path.basename(PATH_M1_PLACA),
+        "m2_vehiculos": os.path.basename(PATH_M2_SEG),
+        "m3_llantas": os.path.basename(PATH_M3_POSE),
     }
 
 
@@ -107,17 +172,7 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
             recorte_vehiculo = img_bgr[max(0, y1):y2, max(0, x1):x2]
 
     # --- M1: Detección de placa (YOLO-v9 ONNX) + OCR ---
-    recorte_placa = recorte_vehiculo
-    conf_m1 = 0.0
-
-    if modelo_m1 is not None:
-        res_m1 = modelo_m1(img_bgr, verbose=False)[0]
-        for box in res_m1.boxes:
-            conf = float(box.conf[0])
-            if conf > conf_m1:
-                conf_m1 = conf
-                px1, py1, px2, py2 = map(int, box.xyxy[0])
-                recorte_placa = img_bgr[max(0, py1):py2, max(0, px1):px2]
+    recorte_placa, conf_m1 = detectar_recorte_placa(img_bgr)
 
     lecturas = lector_ocr.readtext(recorte_placa)
     placa_detectada = None
@@ -130,13 +185,13 @@ async def inferir_vehiculo(imagen: UploadFile = File(...)):
             conf_ocr = float(prob)
 
     # --- M3: Keypoints sobre las ruedas (Número de ejes) ---
-    res_m3 = modelo_m3(recorte_vehiculo, verbose=False)[0] if modelo_m3 is not None else None
+    res_m3 = modelo_m3(recorte_vehiculo, verbose=False)[0]
     ejes = contar_ejes_desde_keypoints(res_m3, categoria)
 
     if placa_detectada:
-        confianza = round(((conf_m2 + conf_ocr) / 2) * 100, 2)
+        confianza = round((conf_m2 + conf_ocr) / 2, 4)
     else:
-        confianza = round(conf_m2 * 50, 2)
+        confianza = round(conf_m2 * 0.5, 4)
 
     latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
 
